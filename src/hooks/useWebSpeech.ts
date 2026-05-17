@@ -203,12 +203,14 @@ export function useWebSpeech(agentId: string) {
   const isConnectedRef = useRef(isConnected);
   const isCallingRef = useRef(isCalling);
   const isAiSpeakingRef = useRef(isAiSpeaking);
+  const isRingingRef = useRef(isRinging);
 
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
   useEffect(() => { isConnectedRef.current = isConnected; }, [isConnected]);
   useEffect(() => { isCallingRef.current = isCalling; }, [isCalling]);
   useEffect(() => { isAiSpeakingRef.current = isAiSpeaking; }, [isAiSpeaking]);
+  useEffect(() => { isRingingRef.current = isRinging; }, [isRinging]);
 
   const activeAgent = PRESET_AGENTS.find(a => a.id === agentId) || PRESET_AGENTS[0];
   const activeAgentRef = useRef(activeAgent);
@@ -370,6 +372,11 @@ export function useWebSpeech(agentId: string) {
       rec.lang = currentAgent.voiceLang;
 
       rec.onresult = (event: any) => {
+        // Ignore speech while ringing, before connecting, or if AI is speaking
+        if (isRingingRef.current || !isConnectedRef.current || isAiSpeakingRef.current) {
+          return;
+        }
+
         const resultIndex = event.resultIndex;
         const transcriptText = event.results[resultIndex][0]?.transcript || "";
         
@@ -440,6 +447,21 @@ export function useWebSpeech(agentId: string) {
     setIsRinging(true);
     setTranscript([]);
     setCallDuration(0);
+
+    // 1. Prime SpeechSynthesis with a silent utterance to unlock audio context on mobile/iOS
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+        const silentUtterance = new SpeechSynthesisUtterance(" ");
+        silentUtterance.volume = 0;
+        window.speechSynthesis.speak(silentUtterance);
+      } catch (e) {
+        console.warn("Failed to prime SpeechSynthesis:", e);
+      }
+    }
+
+    // 2. Prime and start Speech Recognition immediately in the user click event to unlock mic access
+    startSpeechRecognition();
 
     // Simulate 3 seconds ring duration before AI agent picks up
     setTimeout(() => {
