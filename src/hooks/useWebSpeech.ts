@@ -211,6 +211,7 @@ export function useWebSpeech(agentId: string) {
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const isRecognitionActiveRef = useRef(false);
 
   // Keep latest states in refs to prevent closure stale state bugs in async event listeners
   const isMutedRef = useRef(isMuted);
@@ -290,11 +291,16 @@ export function useWebSpeech(agentId: string) {
       return;
     }
 
+    // Set speaking states synchronously BEFORE aborting to prevent onend restart race condition
+    setIsAiSpeaking(true);
+    isAiSpeakingRef.current = true;
+
     // Pause speech recognition while AI is talking to prevent self-transcription loop
     try {
       if (recognitionRef.current) {
         remoteLog("INFO", "Pausing speech recognition for AI speaking turn");
         recognitionRef.current.abort(); // Stop listening immediately
+        isRecognitionActiveRef.current = false;
       }
     } catch (e: any) {
       remoteLog("WARN", "Error stopping recognition for speaking", { error: e.message });
@@ -315,11 +321,13 @@ export function useWebSpeech(agentId: string) {
     utterance.onstart = () => {
       remoteLog("INFO", "SpeechSynthesis Utterance started playing", { text });
       setIsAiSpeaking(true);
+      isAiSpeakingRef.current = true;
     };
 
     utterance.onend = () => {
       remoteLog("INFO", "SpeechSynthesis Utterance finished playing cleanly");
       setIsAiSpeaking(false);
+      isAiSpeakingRef.current = false;
       // Restart listening once AI completes talking
       if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current) {
         remoteLog("INFO", "Restarting speech recognition after synthesis end");
@@ -330,6 +338,7 @@ export function useWebSpeech(agentId: string) {
     utterance.onerror = (e) => {
       remoteLog("ERROR", "SpeechSynthesis Utterance error event triggered", { error: e.error, message: e.toString() });
       setIsAiSpeaking(false);
+      isAiSpeakingRef.current = false;
       if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current) {
         remoteLog("INFO", "Attempting speech recognition restart after synthesis error");
         startSpeechRecognition();
@@ -341,6 +350,8 @@ export function useWebSpeech(agentId: string) {
       remoteLog("INFO", "SpeechSynthesis.speak() execution triggered successfully");
     } catch (e: any) {
       remoteLog("ERROR", "SpeechSynthesis.speak() execution threw an exception", { error: e.message });
+      setIsAiSpeaking(false);
+      isAiSpeakingRef.current = false;
     }
   }, [selectVoice]);
 
@@ -364,6 +375,10 @@ export function useWebSpeech(agentId: string) {
       }
 
       remoteLog("INFO", "AI API route returned successful response", { text: data.text });
+
+      // Synchronously set AI is speaking states to lock the mic before speaking
+      setIsAiSpeaking(true);
+      isAiSpeakingRef.current = true;
 
       const aiReply: Message = {
         role: "ai",
@@ -401,64 +416,88 @@ export function useWebSpeech(agentId: string) {
       remoteLog("INFO", "Initializing new SpeechRecognition instance", { lang: currentAgent.voiceLang });
       const rec = new SpeechRecognition();
       rec.continuous = true;
-      rec.interimResults = false;
+      rec.interimResults = true; // Use interimResults to keep mobile Speech Recognition highly responsive
       rec.lang = currentAgent.voiceLang;
 
       rec.onstart = () => {
+        isRecognitionActiveRef.current = true;
         remoteLog("INFO", "SpeechRecognition event: onstart (Microphone capturing is now fully ACTIVE)");
       };
 
       rec.onresult = (event: any) => {
-        const resultIndex = event.resultIndex;
-        const transcriptText = event.results[resultIndex][0]?.transcript || "";
-        
-        remoteLog("INFO", "SpeechRecognition event: onresult received text capture", {
-          transcriptText,
-          isRinging: isRingingRef.current,
-          isConnected: isConnectedRef.current,
-          isAiSpeaking: isAiSpeakingRef.current
-        });
-
         // Ignore speech while ringing, before connecting, or if AI is speaking
         if (isRingingRef.current || !isConnectedRef.current || isAiSpeakingRef.current) {
-          remoteLog("INFO", "Ignoring transcriptText due to call state (ringing, not connected, or AI speaking)");
           return;
         }
 
-        if (transcriptText.trim()) {
+        let interimTranscript = "";
+        let finalTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        const activeText = finalTranscript || interimTranscript;
+
+        if (activeText.trim()) {
           // Clear any active silence-detection timeouts
           if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
 
-          // Append user message
-          const userMsg: Message = {
-            role: "user",
-            text: transcriptText.trim(),
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          };
+          remoteLog("INFO", "SpeechRecognition captured interim/final text", {
+            activeText,
+            isFinal: !!finalTranscript
+          });
 
-          // Trigger AI response after a short conversational pause (600ms silence detection)
+          // Trigger AI response after a short conversational pause (800ms silence detection)
           silenceTimeoutRef.current = setTimeout(() => {
             if (!isCallingRef.current) {
               remoteLog("WARN", "Call ended before silence timer completed, skipping request");
               return;
             }
+
+            // Re-check speaking turn before submitting to prevent double trigger
+            if (isAiSpeakingRef.current) {
+              remoteLog("WARN", "AI is already speaking, skipping captured text submission");
+              return;
+            }
+
+            const userMsg: Message = {
+              role: "user",
+              text: activeText.trim(),
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+
             const updatedHistory = [...transcriptRef.current, userMsg];
             setTranscript(updatedHistory);
             triggerAiResponse(updatedHistory);
-          }, 600);
+          }, 800);
         }
       };
 
       rec.onerror = (event: any) => {
         remoteLog("ERROR", "SpeechRecognition event: onerror triggered", { error: event.error, message: event.message });
-        if (event.error === "no-speech") return;
+        isRecognitionActiveRef.current = false;
+        
+        // DO NOT auto-restart if aborted (either by AI speaking or browser abort) or no-speech or not-allowed
+        if (event.error === "no-speech" || event.error === "aborted" || event.error === "not-allowed") {
+          return;
+        }
         
         // Auto-restart on non-fatal errors
         if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
           remoteLog("INFO", "Auto-restarting SpeechRecognition after error");
           setTimeout(() => {
-            try { recognitionRef.current.start(); } catch (e: any) {
-              remoteLog("WARN", "Error restarting SpeechRecognition post-error", { error: e.message });
+            if (!isRecognitionActiveRef.current && isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
+              try { 
+                recognitionRef.current.start(); 
+                isRecognitionActiveRef.current = true;
+              } catch (e: any) {
+                remoteLog("WARN", "Error restarting SpeechRecognition post-error", { error: e.message });
+              }
             }
           }, 1000);
         }
@@ -469,14 +508,20 @@ export function useWebSpeech(agentId: string) {
           isConnected: isConnectedRef.current,
           isCalling: isCallingRef.current,
           isMuted: isMutedRef.current,
-          isAiSpeaking: isAiSpeakingRef.current
+          isAiSpeaking: isAiSpeakingRef.current,
+          isRecognitionActive: isRecognitionActiveRef.current
         });
+        
+        isRecognitionActiveRef.current = false;
         
         // Auto-restart speech loop if call is active and user is not muted or AI is not speaking
         if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
           remoteLog("INFO", "Auto-restarting SpeechRecognition after onend closure");
           try {
-            recognitionRef.current.start();
+            if (!isRecognitionActiveRef.current) {
+              recognitionRef.current.start();
+              isRecognitionActiveRef.current = true;
+            }
           } catch (e: any) {
             remoteLog("WARN", "Error auto-restarting SpeechRecognition onend", { error: e.message });
           }
@@ -490,10 +535,14 @@ export function useWebSpeech(agentId: string) {
     recognitionRef.current.lang = currentAgent.voiceLang;
 
     try {
-      recognitionRef.current.start();
-      remoteLog("INFO", "recognitionRef.current.start() execution triggered successfully");
+      if (!isRecognitionActiveRef.current) {
+        recognitionRef.current.start();
+        isRecognitionActiveRef.current = true;
+        remoteLog("INFO", "recognitionRef.current.start() execution triggered successfully");
+      } else {
+        remoteLog("INFO", "recognitionRef.current.start() skipped because it is already active");
+      }
     } catch (e: any) {
-      // recognition already started, skip
       remoteLog("WARN", "recognitionRef.current.start() triggered exception (possibly already running)", { error: e.message });
     }
   }, [triggerAiResponse]);
