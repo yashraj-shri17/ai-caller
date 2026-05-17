@@ -216,7 +216,7 @@ export function Dialer({ selectedAgentId, onSelectAgent, onStartCall }: DialerPr
         <div className={styles.keypadDialRow}>
           <button 
             className={styles.dialGreenBtn}
-            onClick={onStartCall}
+            onClick={() => onStartCall()}
           >
             <Phone size={24} fill="#fff" color="#fff" />
           </button>
