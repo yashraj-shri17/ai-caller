@@ -1,0 +1,209 @@
+:root {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  --primary: #ff5500;
+  --primary-rgb: 255, 85, 0;
+  --primary-hover: #e04b00;
+  --success: #10b981;
+  --success-rgb: 16, 185, 129;
+  --danger: #ef4444;
+  --danger-rgb: 239, 68, 68;
+  --card-bg: rgba(255, 255, 255, 0.03);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --glass-bg: rgba(15, 15, 20, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.05);
+  --text-muted: #a1a1aa;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  user-select: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: var(--background);
+  background: radial-gradient(circle at 50% 50%, #18181b 0%, #09090b 100%);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Glassmorphism utility classes */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+}
+
+.glass-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  border-color: rgba(255, 85, 0, 0.2);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+/* Primary buttons with glowing transitions */
+.glow-button {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 9999px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 15px rgba(255, 85, 0, 0.4);
+}
+
+.glow-button:hover {
+  background: var(--primary-hover);
+  box-shadow: 0 0 25px rgba(255, 85, 0, 0.6);
+  transform: translateY(-1px);
+}
+
+.glow-button:active {
+  transform: translateY(1px);
+}
+
+/* Micro-animations */
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 85, 0, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(255, 85, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 85, 0, 0);
+  }
+}
+
+@keyframes greenPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 15px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+@keyframes pulseAvatar {
+  0%, 100% {
+    transform: scale(1);
+    border-color: rgba(255, 85, 0, 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    border-color: rgba(255, 85, 0, 0.8);
+    box-shadow: 0 0 30px rgba(255, 85, 0, 0.2);
+  }
+}
+
+@keyframes ringAnimation {
+  0%, 100% {
+    transform: rotate(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: rotate(-10deg);
+  }
+  20%, 40%, 60%, 80% {
+    transform: rotate(10deg);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(30px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2s infinite;
+}
+
+.animate-green-pulse {
+  animation: greenPulse 2s infinite;
+}
+
+.animate-pulse-avatar {
+  animation: pulseAvatar 3s infinite ease-in-out;
+}
+
+.animate-ring {
+  animation: ringAnimation 0.5s infinite;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+/* Audio Wave Visualizer Base */
+.visualizer-container {
+  width: 100%;
+  height: 120px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}

@@ -1,0 +1,17 @@
+{
+  "short_name": "AuraCall AI",
+  "name": "AuraCall AI Voice Calling Portal",
+  "icons": [
+    {
+      "src": "/globe.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0a0a0c",
+  "theme_color": "#ff5500",
+  "display": "standalone",
+  "orientation": "portrait"
+}
