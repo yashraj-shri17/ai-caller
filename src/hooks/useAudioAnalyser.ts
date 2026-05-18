@@ -11,7 +11,14 @@ export function useAudioAnalyser(isActive: boolean, isMuted: boolean) {
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
   useEffect(() => {
-    if (!isActive || isMuted) {
+    // ANDROID FIX: SpeechRecognition already holds the mic on mobile.
+    // Opening a second getUserMedia stream simultaneously causes Android Chrome to
+    // silently destabilize/kill the SpeechRecognition session.
+    // Skip audio analyser entirely on mobile — WaveVisualizer will animate from isAiSpeaking state.
+    const isMobile = typeof navigator !== "undefined" &&
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+    if (isMobile || !isActive || isMuted) {
       cleanup();
       setVolume(0);
       return;

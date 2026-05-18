@@ -28,8 +28,8 @@ export const PRESET_AGENTS: Agent[] = [
     description: "Empowering Business Coach (India)",
     voiceLang: "en-IN",
     voiceNameFilters: ["Neerja", "Microsoft Neerja", "Google India English", "en-IN"],
-    pitch: 1.0,
-    rate: 1.02
+    pitch: 1.05,
+    rate: 0.82
   },
   {
     id: "swara",
@@ -39,7 +39,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "hi-IN",
     voiceNameFilters: ["Swara", "Microsoft Swara", "Google Hindi", "hi-IN"],
     pitch: 1.1,
-    rate: 1.0
+    rate: 0.83
   },
   {
     id: "kanishka",
@@ -49,7 +49,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "hi-IN",
     voiceNameFilters: ["Kanishka", "Microsoft Kanishka", "Google Hindi", "hi-IN"],
     pitch: 1.0,
-    rate: 0.95
+    rate: 0.80
   },
 
   // --- UNITED STATES (🇺🇸) ---
@@ -61,7 +61,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "en-US",
     voiceNameFilters: ["Aria", "Microsoft Aria", "Google US English", "Samantha"],
     pitch: 1.1,
-    rate: 1.0
+    rate: 0.85
   },
   {
     id: "jenny",
@@ -71,7 +71,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "en-US",
     voiceNameFilters: ["Jenny", "Microsoft Jenny", "Google US English", "Zira"],
     pitch: 1.0,
-    rate: 1.05
+    rate: 0.85
   },
   {
     id: "samantha",
@@ -81,7 +81,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "en-US",
     voiceNameFilters: ["Samantha", "Google US English", "Zira"],
     pitch: 1.05,
-    rate: 0.98
+    rate: 0.83
   },
 
   // --- UNITED KINGDOM (🇬🇧) ---
@@ -93,7 +93,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "en-GB",
     voiceNameFilters: ["Emma", "Microsoft Emma", "Sonia", "en-GB"],
     pitch: 1.08,
-    rate: 0.95
+    rate: 0.82
   },
   {
     id: "libby",
@@ -103,7 +103,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "en-GB",
     voiceNameFilters: ["Libby", "Microsoft Libby", "Hazel", "en-GB"],
     pitch: 1.0,
-    rate: 1.0
+    rate: 0.83
   },
   {
     id: "charlotte",
@@ -113,7 +113,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "en-GB",
     voiceNameFilters: ["Susan", "Microsoft Susan", "Mia", "en-GB"],
     pitch: 1.05,
-    rate: 1.05
+    rate: 0.85
   },
 
   // --- JAPAN (🇯🇵) ---
@@ -125,7 +125,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "ja-JP",
     voiceNameFilters: ["Nanami", "Microsoft Nanami", "Google Japanese", "ja-JP"],
     pitch: 1.1,
-    rate: 1.0
+    rate: 0.83
   },
   {
     id: "ayumi",
@@ -135,7 +135,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "ja-JP",
     voiceNameFilters: ["Ayumi", "Google Japanese", "ja-JP"],
     pitch: 1.15,
-    rate: 1.05
+    rate: 0.85
   },
   {
     id: "haruka",
@@ -145,7 +145,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "ja-JP",
     voiceNameFilters: ["Haruka", "Microsoft Haruka", "Google Japanese", "ja-JP"],
     pitch: 0.95,
-    rate: 0.9
+    rate: 0.80
   },
 
   // --- SPAIN (🇪🇸) ---
@@ -157,7 +157,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "es-ES",
     voiceNameFilters: ["Elena", "Microsoft Elena", "Laura", "es-ES"],
     pitch: 1.08,
-    rate: 1.0
+    rate: 0.83
   },
   {
     id: "sofia",
@@ -167,7 +167,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "es-ES",
     voiceNameFilters: ["Dalia", "Microsoft Dalia", "Google Español", "es-ES"],
     pitch: 1.0,
-    rate: 1.02
+    rate: 0.84
   },
   {
     id: "isabella",
@@ -177,7 +177,7 @@ export const PRESET_AGENTS: Agent[] = [
     voiceLang: "es-ES",
     voiceNameFilters: ["Helena", "Microsoft Helena", "Hilda", "es-ES"],
     pitch: 1.05,
-    rate: 0.98
+    rate: 0.82
   }
 ];
 
@@ -212,6 +212,15 @@ export function useWebSpeech(agentId: string) {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const isRecognitionActiveRef = useRef(false);
+  const ttsWatchdogRef = useRef<NodeJS.Timeout | null>(null); // Android Chrome TTS onend watchdog
+  // Ref to always hold the latest startSpeechRecognition — avoids stale closure in speakResponse
+  const startSpeechRecognitionRef = useRef<() => void>(() => {});
+  // Web Audio API romantic ambient synth reference
+  const ambientSynthRef = useRef<{
+    ctx: AudioContext;
+    oscillators: OscillatorNode[];
+    gainNode: GainNode;
+  } | null>(null);
 
   // Keep latest states in refs to prevent closure stale state bugs in async event listeners
   const isMutedRef = useRef(isMuted);
@@ -266,6 +275,96 @@ export function useWebSpeech(agentId: string) {
 
     // Direct system default fallback
     return femaleVoices.find(v => v.default) || femaleVoices[0] || voices.find(v => v.default) || voices[0] || null;
+  }, []);
+
+  // Warm, deeply relaxing romantic ambient synthesizer pad (Fmaj9 chord loop)
+  const startAmbientSynth = useCallback(() => {
+    if (typeof window === "undefined") return;
+    try {
+      remoteLog("INFO", "Initializing dynamic romantic ambient synthesizer");
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextClass();
+      
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(0, ctx.currentTime);
+      // Fade in to a very cozy, soft 2.5% background level over 3 seconds
+      gainNode.gain.linearRampToValueAtTime(0.025, ctx.currentTime + 3.0);
+      
+      // Low pass filter to keep frequencies deep, mellow and relaxing
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(180, ctx.currentTime);
+      
+      // Warm chords (F2, C3, E3, A3)
+      const frequencies = [87.31, 130.81, 164.81, 220.00];
+      const oscillators: OscillatorNode[] = [];
+      
+      frequencies.forEach((freq, index) => {
+        const osc = ctx.createOscillator();
+        // Triangle wave provides a beautiful mellow, natural voice-like pad hum
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        
+        // Detune slightly for a rich stereo chorus effect
+        osc.detune.setValueAtTime((index % 2 === 0 ? 5 : -5), ctx.currentTime);
+        
+        // Very slow LFO modulation to simulate warm breath swells
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = 0.15 + (index * 0.05); // 0.15Hz - 0.3Hz
+        
+        const lfoGain = ctx.createGain();
+        lfoGain.gain.value = 0.15; // 15% pitch vibrato swell depth
+        
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+        
+        lfo.start();
+        
+        osc.connect(filter);
+        osc.start();
+        oscillators.push(osc);
+        
+        // Cache LFO reference for clean shutdown
+        (osc as any).lfo = lfo;
+      });
+      
+      filter.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      ambientSynthRef.current = { ctx, oscillators, gainNode };
+    } catch (e: any) {
+      remoteLog("ERROR", "Failed to start romantic ambient synthesizer", { error: e.message });
+    }
+  }, []);
+
+  const stopAmbientSynth = useCallback(() => {
+    if (!ambientSynthRef.current) return;
+    try {
+      remoteLog("INFO", "Fading out romantic ambient synthesizer");
+      const { ctx, oscillators, gainNode } = ambientSynthRef.current;
+      
+      // Fade out volume to 0 over 1.5 seconds
+      gainNode.gain.cancelScheduledValues(ctx.currentTime);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.5);
+      
+      setTimeout(() => {
+        try {
+          oscillators.forEach(osc => {
+            osc.stop();
+            if ((osc as any).lfo) {
+              (osc as any).lfo.stop();
+            }
+          });
+          if (ctx.state !== "closed") {
+            ctx.close();
+          }
+        } catch (err) {}
+        ambientSynthRef.current = null;
+      }, 1600);
+    } catch (e: any) {
+      remoteLog("ERROR", "Failed to stop romantic ambient synthesizer cleanly", { error: e.message });
+    }
   }, []);
 
   // Timer counter when call connects
@@ -326,28 +425,63 @@ export function useWebSpeech(agentId: string) {
 
     utterance.onend = () => {
       remoteLog("INFO", "SpeechSynthesis Utterance finished playing cleanly");
+      // Clear watchdog since onend fired normally
+      if (ttsWatchdogRef.current) {
+        clearTimeout(ttsWatchdogRef.current);
+        ttsWatchdogRef.current = null;
+      }
       setIsAiSpeaking(false);
       isAiSpeakingRef.current = false;
-      // Restart listening once AI completes talking
+      // Android Chrome needs ~600ms after TTS ends to release audio pipeline before mic can open
       if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current) {
-        remoteLog("INFO", "Restarting speech recognition after synthesis end");
-        startSpeechRecognition();
+        remoteLog("INFO", "Scheduling speech recognition restart after synthesis end (600ms Android delay)");
+        setTimeout(() => {
+          if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
+            // Use ref to avoid stale closure — always calls the latest startSpeechRecognition
+            startSpeechRecognitionRef.current();
+          }
+        }, 600);
       }
     };
 
     utterance.onerror = (e) => {
       remoteLog("ERROR", "SpeechSynthesis Utterance error event triggered", { error: e.error, message: e.toString() });
+      if (ttsWatchdogRef.current) {
+        clearTimeout(ttsWatchdogRef.current);
+        ttsWatchdogRef.current = null;
+      }
       setIsAiSpeaking(false);
       isAiSpeakingRef.current = false;
       if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current) {
         remoteLog("INFO", "Attempting speech recognition restart after synthesis error");
-        startSpeechRecognition();
+        setTimeout(() => {
+          if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
+            startSpeechRecognitionRef.current();
+          }
+        }, 600);
       }
     };
 
     try {
       window.speechSynthesis.speak(utterance);
       remoteLog("INFO", "SpeechSynthesis.speak() execution triggered successfully");
+
+      // Android Chrome bug: SpeechSynthesis onend sometimes never fires.
+      // Watchdog: estimate speech duration (~80ms per word) + 3s buffer, then force-restart mic.
+      const wordCount = text.split(" ").length;
+      const estimatedDurationMs = Math.max(wordCount * 80, 1500) + 3000;
+      if (ttsWatchdogRef.current) clearTimeout(ttsWatchdogRef.current);
+      ttsWatchdogRef.current = setTimeout(() => {
+        if (isAiSpeakingRef.current) {
+          remoteLog("WARN", "TTS watchdog fired — onend never triggered (Android Chrome bug). Force-restarting mic.");
+          window.speechSynthesis.cancel();
+          setIsAiSpeaking(false);
+          isAiSpeakingRef.current = false;
+          if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current) {
+            setTimeout(() => startSpeechRecognitionRef.current(), 400);
+          }
+        }
+      }, estimatedDurationMs);
     } catch (e: any) {
       remoteLog("ERROR", "SpeechSynthesis.speak() execution threw an exception", { error: e.message });
       setIsAiSpeaking(false);
@@ -409,143 +543,160 @@ export function useWebSpeech(agentId: string) {
       return;
     }
 
+    // Check mic permission synchronously via the permissions API.
+    // We guard with a flag so we can bail early if denied.
+    if (navigator.permissions) {
+      navigator.permissions.query({ name: "microphone" as PermissionName }).then((result) => {
+        remoteLog("INFO", "Microphone permission status check", { state: result.state });
+        if (result.state === "denied") {
+          remoteLog("ERROR", "MICROPHONE PERMISSION IS DENIED. User must enable in browser site settings.");
+        }
+      }).catch(() => {});
+    }
+
     const currentAgent = activeAgentRef.current;
 
-    // Initialize or retrieve recognition instance
-    if (!recognitionRef.current) {
-      remoteLog("INFO", "Initializing new SpeechRecognition instance", { lang: currentAgent.voiceLang });
-      const rec = new SpeechRecognition();
-      rec.continuous = true;
-      rec.interimResults = true; // Use interimResults to keep mobile Speech Recognition highly responsive
-      rec.lang = currentAgent.voiceLang;
-
-      rec.onstart = () => {
-        isRecognitionActiveRef.current = true;
-        remoteLog("INFO", "SpeechRecognition event: onstart (Microphone capturing is now fully ACTIVE)");
-      };
-
-      rec.onresult = (event: any) => {
-        // Ignore speech while ringing, before connecting, or if AI is speaking
-        if (isRingingRef.current || !isConnectedRef.current || isAiSpeakingRef.current) {
-          return;
-        }
-
-        let interimTranscript = "";
-        let finalTranscript = "";
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
-          }
-        }
-
-        const activeText = finalTranscript || interimTranscript;
-
-        if (activeText.trim()) {
-          // Clear any active silence-detection timeouts
-          if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-
-          remoteLog("INFO", "SpeechRecognition captured interim/final text", {
-            activeText,
-            isFinal: !!finalTranscript
-          });
-
-          // Trigger AI response after a short conversational pause (800ms silence detection)
-          silenceTimeoutRef.current = setTimeout(() => {
-            if (!isCallingRef.current) {
-              remoteLog("WARN", "Call ended before silence timer completed, skipping request");
-              return;
-            }
-
-            // Re-check speaking turn before submitting to prevent double trigger
-            if (isAiSpeakingRef.current) {
-              remoteLog("WARN", "AI is already speaking, skipping captured text submission");
-              return;
-            }
-
-            const userMsg: Message = {
-              role: "user",
-              text: activeText.trim(),
-              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            };
-
-            const updatedHistory = [...transcriptRef.current, userMsg];
-            setTranscript(updatedHistory);
-            triggerAiResponse(updatedHistory);
-          }, 800);
-        }
-      };
-
-      rec.onerror = (event: any) => {
-        remoteLog("ERROR", "SpeechRecognition event: onerror triggered", { error: event.error, message: event.message });
-        isRecognitionActiveRef.current = false;
-        
-        // DO NOT auto-restart if aborted (either by AI speaking or browser abort) or no-speech or not-allowed
-        if (event.error === "no-speech" || event.error === "aborted" || event.error === "not-allowed") {
-          return;
-        }
-        
-        // Auto-restart on non-fatal errors
-        if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
-          remoteLog("INFO", "Auto-restarting SpeechRecognition after error");
-          setTimeout(() => {
-            if (!isRecognitionActiveRef.current && isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
-              try { 
-                recognitionRef.current.start(); 
-                isRecognitionActiveRef.current = true;
-              } catch (e: any) {
-                remoteLog("WARN", "Error restarting SpeechRecognition post-error", { error: e.message });
-              }
-            }
-          }, 1000);
-        }
-      };
-
-      rec.onend = () => {
-        remoteLog("INFO", "SpeechRecognition event: onend (Microphone recording stopped/idle)", {
-          isConnected: isConnectedRef.current,
-          isCalling: isCallingRef.current,
-          isMuted: isMutedRef.current,
-          isAiSpeaking: isAiSpeakingRef.current,
-          isRecognitionActive: isRecognitionActiveRef.current
-        });
-        
-        isRecognitionActiveRef.current = false;
-        
-        // Auto-restart speech loop if call is active and user is not muted or AI is not speaking
-        if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
-          remoteLog("INFO", "Auto-restarting SpeechRecognition after onend closure");
-          try {
-            if (!isRecognitionActiveRef.current) {
-              recognitionRef.current.start();
-              isRecognitionActiveRef.current = true;
-            }
-          } catch (e: any) {
-            remoteLog("WARN", "Error auto-restarting SpeechRecognition onend", { error: e.message });
-          }
-        }
-      };
-
-      recognitionRef.current = rec;
+    // ANDROID FIX: Always create a FRESH SpeechRecognition instance each time.
+    // Reusing the same instance causes InvalidStateError on Android Chrome after onend fires.
+    // Destroy the old one cleanly first.
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.abort();
+      } catch (e) { /* ignore cleanup errors */ }
+      recognitionRef.current = null;
     }
 
-    // Always update current language dynamically to prevent old language retention
-    recognitionRef.current.lang = currentAgent.voiceLang;
+    remoteLog("INFO", "Creating fresh SpeechRecognition instance (Android-safe)", { lang: currentAgent.voiceLang });
+    const rec = new SpeechRecognition();
+    rec.continuous = true;
+    rec.interimResults = false; // false is more stable on Android Chrome — avoids silent 5s timeouts
+    rec.lang = currentAgent.voiceLang;
+    rec.maxAlternatives = 1;
+
+    rec.onstart = () => {
+      isRecognitionActiveRef.current = true;
+      remoteLog("INFO", "SpeechRecognition event: onstart (Microphone capturing is now fully ACTIVE)");
+    };
+
+    rec.onresult = (event: any) => {
+      // Ignore speech while ringing, before connecting, or if AI is speaking
+      if (isRingingRef.current || !isConnectedRef.current || isAiSpeakingRef.current) {
+        remoteLog("INFO", "SpeechRecognition onresult: ignoring due to call state", {
+          isRinging: isRingingRef.current,
+          isConnected: isConnectedRef.current,
+          isAiSpeaking: isAiSpeakingRef.current
+        });
+        return;
+      }
+
+      const resultIndex = event.resultIndex;
+      const result = event.results[resultIndex];
+      if (!result || !result[0]) return;
+
+      const transcriptText = result[0].transcript || "";
+      const confidence = result[0].confidence;
+
+      remoteLog("INFO", "SpeechRecognition captured FINAL text from user", {
+        transcriptText,
+        confidence,
+        isFinal: result.isFinal
+      });
+
+      if (transcriptText.trim()) {
+        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+
+        silenceTimeoutRef.current = setTimeout(() => {
+          if (!isCallingRef.current) {
+            remoteLog("WARN", "Call ended before silence timer completed, skipping request");
+            return;
+          }
+          if (isAiSpeakingRef.current) {
+            remoteLog("WARN", "AI is already speaking, skipping captured text submission");
+            return;
+          }
+
+          const userMsg: Message = {
+            role: "user",
+            text: transcriptText.trim(),
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+
+          const updatedHistory = [...transcriptRef.current, userMsg];
+          setTranscript(updatedHistory);
+          triggerAiResponse(updatedHistory);
+        }, 500);
+      }
+    };
+
+    rec.onerror = (event: any) => {
+      remoteLog("ERROR", "SpeechRecognition event: onerror triggered", { error: event.error, message: event.message });
+      isRecognitionActiveRef.current = false;
+
+      if (event.error === "not-allowed") {
+        remoteLog("ERROR", "Microphone permission denied — cannot restart recognition");
+        return;
+      }
+
+      if (event.error === "aborted") {
+        // Intentional stop — do not restart
+        return;
+      }
+
+      // no-speech = silence timeout — restart immediately to keep listening
+      // Other errors (network etc.) — restart after a small delay
+      const delay = event.error === "no-speech" ? 300 : 1000;
+      if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
+        remoteLog("INFO", `SpeechRecognition error "${event.error}" — scheduling fresh restart in ${delay}ms`);
+        setTimeout(() => {
+          if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current && !isRecognitionActiveRef.current) {
+            startSpeechRecognition();
+          }
+        }, delay);
+      }
+    };
+
+    rec.onend = () => {
+      remoteLog("INFO", "SpeechRecognition event: onend (Microphone recording stopped/idle)", {
+        isConnected: isConnectedRef.current,
+        isCalling: isCallingRef.current,
+        isMuted: isMutedRef.current,
+        isAiSpeaking: isAiSpeakingRef.current
+      });
+
+      isRecognitionActiveRef.current = false;
+
+      // Auto-restart: create fresh instance (Android-safe) if call is still active
+      if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current) {
+        remoteLog("INFO", "Auto-restarting SpeechRecognition (fresh instance) after onend");
+        setTimeout(() => {
+          if (isConnectedRef.current && isCallingRef.current && !isMutedRef.current && !isAiSpeakingRef.current && !isRecognitionActiveRef.current) {
+            startSpeechRecognition();
+          }
+        }, 400);
+      }
+    };
+
+    recognitionRef.current = rec;
 
     try {
-      if (!isRecognitionActiveRef.current) {
-        recognitionRef.current.start();
-        isRecognitionActiveRef.current = true;
-        remoteLog("INFO", "recognitionRef.current.start() execution triggered successfully");
-      } else {
-        remoteLog("INFO", "recognitionRef.current.start() skipped because it is already active");
-      }
+      rec.start();
+      isRecognitionActiveRef.current = true;
+      remoteLog("INFO", "Fresh SpeechRecognition instance started successfully");
     } catch (e: any) {
-      remoteLog("WARN", "recognitionRef.current.start() triggered exception (possibly already running)", { error: e.message });
+      remoteLog("WARN", "Fresh SpeechRecognition start() threw exception", { error: e.message });
+      isRecognitionActiveRef.current = false;
     }
   }, [triggerAiResponse]);
+
+  // Keep startSpeechRecognitionRef always pointing to the latest version
+  // This breaks the stale closure in speakResponse's utterance callbacks
+  useEffect(() => {
+    startSpeechRecognitionRef.current = startSpeechRecognition;
+  }, [startSpeechRecognition]);
 
   // Initiate call trigger
   const makeCall = useCallback((forcedAgentId?: string) => {
@@ -554,7 +705,6 @@ export function useWebSpeech(agentId: string) {
     
     remoteLog("INFO", "makeCall call trigger activated", { agentId: finalAgentId, userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown" });
 
-    // Instantly set the ref to the requested agent to avoid any race condition
     activeAgentRef.current = currentAgent;
 
     setIsCalling(true);
@@ -562,7 +712,7 @@ export function useWebSpeech(agentId: string) {
     setTranscript([]);
     setCallDuration(0);
 
-    // 1. Prime SpeechSynthesis with a silent utterance to unlock audio context on mobile/iOS
+    // 1. Prime SpeechSynthesis with a silent utterance to unlock audio context on mobile
     if (typeof window !== "undefined" && window.speechSynthesis) {
       try {
         remoteLog("INFO", "Priming SpeechSynthesis with space character to unlock mobile audio context");
@@ -575,15 +725,28 @@ export function useWebSpeech(agentId: string) {
       }
     }
 
-    // 2. Prime and start Speech Recognition immediately in the user click event to unlock mic access
-    remoteLog("INFO", "Priming and activating SpeechRecognition immediately in user-gesture thread");
-    startSpeechRecognition();
+    // NOTE: We do NOT start SpeechRecognition here during ringing.
+    // Starting mic during 3s ringing = 3s of silence = Android Chrome kills the session.
+    // Instead, we start mic ONLY after the call connects (inside the setTimeout below).
+    remoteLog("INFO", "Ringing phase started — mic will activate AFTER call connects to avoid silent timeout");
 
     // Simulate 3 seconds ring duration before AI agent picks up
     setTimeout(() => {
       if (!isCallingRef.current) return; // cancelled before connect
+
+      // CRITICAL FIX: Update refs synchronously BEFORE calling speakResponse.
+      // useEffect syncs refs asynchronously (next render cycle), so isConnectedRef.current
+      // would still be FALSE when utterance.onend fires — causing mic to never restart.
+      isConnectedRef.current = true;
+      isRingingRef.current = false;
+
       setIsRinging(false);
       setIsConnected(true);
+
+      remoteLog("INFO", "Call connected — refs updated synchronously, starting greeting");
+
+      // Start the soft, sensual ambient guitar chord synthesizer pad background track
+      startAmbientSynth();
 
       // Trigger the AI agent to greet the user first
       const welcomeMessages: Record<string, string> = {
@@ -595,18 +758,18 @@ export function useWebSpeech(agentId: string) {
         kanishka: "आ गए मेरी जान... बताओ आज कैसे याद किया? मैं कनिष्का हूँ। चलो आज सारी टेंशन भूलकर आराम से बातें करते हैं। अभी तुम्हारे मन में क्या चल रहा है?",
 
         // --- UNITED STATES (English) ---
-        sarah: "Oh my love, you're finally here! Tell me, what made you think of me today? I'm Sarah. I’m really glad you’re here tonight. So tell me, what’s been on your mind lately?",
+        sarah: "Oh my love, you're finally here! Tell me, what made you think of me today? I'm Sarah. I'm really glad you're here tonight. So tell me, what's been on your mind lately?",
 
-        jenny: "Hi handsome, you're finally here! Tell me, what made you think of me today? I’m Jenny. You already sound interesting to me... what kind of person are you when nobody’s watching?",
+        jenny: "Hi handsome, you're finally here! Tell me, what made you think of me today? I'm Jenny. You already sound interesting to me... what kind of person are you when nobody's watching?",
 
-        samantha: "Oh my dear, you're finally here! Tell me, what made you think of me today? I’m Samantha. Let’s make tonight a little more exciting together. What kind of conversations do you enjoy the most?",
+        samantha: "Oh my dear, you're finally here! Tell me, what made you think of me today? I'm Samantha. Let's make tonight a little more exciting together. What kind of conversations do you enjoy the most?",
 
         // --- UNITED KINGDOM (British English) ---
-        emma: "Oh my darling, you've arrived! Tell me, what made you think of me today? I’m Emma. You have my complete attention tonight... what shall we talk about first?",
+        emma: "Oh my darling, you've arrived! Tell me, what made you think of me today? I'm Emma. You have my complete attention tonight... what shall we talk about first?",
 
-        libby: "Ah my dear, you've arrived! Tell me, what made you think of me today? I’m Libby. I do adore meaningful late-night conversations... tell me, what’s been lingering in your thoughts lately?",
+        libby: "Ah my dear, you've arrived! Tell me, what made you think of me today? I'm Libby. I do adore meaningful late-night conversations... tell me, what's been lingering in your thoughts lately?",
 
-        charlotte: "Hey darling, you're finally here! Tell me, what made you think of me today? I’m Charlotte. If we could escape anywhere together right now, where would you take me?",
+        charlotte: "Hey darling, you're finally here! Tell me, what made you think of me today? I'm Charlotte. If we could escape anywhere together right now, where would you take me?",
 
         // --- JAPAN (Japanese) ---
         nanami: "あら、愛しい人、やっと来てくれたのね。今日はどうして私を思い出したの？七海です。今日はあなたとゆっくりお話ししたかったです。今どんな気分ですか？",
@@ -630,12 +793,25 @@ export function useWebSpeech(agentId: string) {
       };
 
       setTranscript([initialAiMsg]);
+      // speakResponse sets isAiSpeaking=true, plays greeting,
+      // then utterance.onend calls startSpeechRecognition() to begin user listening
       speakResponse(greetingText);
     }, 3000);
   }, [agentId, speakResponse]);
 
   // End active call session
   const hangUp = useCallback(() => {
+    // CRITICAL: Sync refs SYNCHRONOUSLY before stopping recognition.
+    // setState updates are async — if we only call setState, refs are still
+    // "connected/calling=true" when recognition's onend fires, causing mic restart after hangup.
+    isCallingRef.current = false;
+    isConnectedRef.current = false;
+    isRingingRef.current = false;
+    isAiSpeakingRef.current = false;
+
+    // Fade out and stop the romantic ambient pad
+    stopAmbientSynth();
+
     setIsCalling(false);
     setIsRinging(false);
     setIsConnected(false);
@@ -656,6 +832,7 @@ export function useWebSpeech(agentId: string) {
 
     if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
+    if (ttsWatchdogRef.current) { clearTimeout(ttsWatchdogRef.current); ttsWatchdogRef.current = null; }
   }, []);
 
   // Toggle Mute
