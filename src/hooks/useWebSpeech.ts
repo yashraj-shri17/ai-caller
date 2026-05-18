@@ -277,7 +277,7 @@ export function useWebSpeech(agentId: string) {
     return femaleVoices.find(v => v.default) || femaleVoices[0] || voices.find(v => v.default) || voices[0] || null;
   }, []);
 
-  // Warm, deeply relaxing romantic ambient synthesizer pad (Fmaj9 chord loop)
+  // Celestial, warm, relaxing ambient synthesizer pad (air-like tones)
   const startAmbientSynth = useCallback(() => {
     if (typeof window === "undefined") return;
     try {
@@ -287,40 +287,44 @@ export function useWebSpeech(agentId: string) {
       
       const gainNode = ctx.createGain();
       gainNode.gain.setValueAtTime(0, ctx.currentTime);
-      // Fade in to a very cozy, soft 2.5% background level over 3 seconds
-      gainNode.gain.linearRampToValueAtTime(0.025, ctx.currentTime + 3.0);
+      // Fade in to an extremely subtle, whisper-soft 0.3% volume over 4 seconds
+      // This is beautiful, soothing, and acts as a delicate background breeze without any buzzing
+      gainNode.gain.linearRampToValueAtTime(0.003, ctx.currentTime + 4.0);
       
-      // Low pass filter to keep frequencies deep, mellow and relaxing
+      // Gentle bandpass filter to keep it airy, soft, and warm
       const filter = ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(180, ctx.currentTime);
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(320, ctx.currentTime); // Mid-range sweet spot for phone speakers
+      filter.Q.setValueAtTime(1.0, ctx.currentTime);
       
-      // Warm chords (F2, C3, E3, A3)
-      const frequencies = [87.31, 130.81, 164.81, 220.00];
+      // Soft, high-register celestial chord (C4, F4, A4, C5)
+      const frequencies = [261.63, 349.23, 440.00, 523.25];
       const oscillators: OscillatorNode[] = [];
       
       frequencies.forEach((freq, index) => {
         const osc = ctx.createOscillator();
-        // Triangle wave provides a beautiful mellow, natural voice-like pad hum
-        osc.type = "triangle";
+        // Pure sine wave for beautiful, crystalline, non-distorting phone audio
+        osc.type = "sine";
         osc.frequency.setValueAtTime(freq, ctx.currentTime);
         
-        // Detune slightly for a rich stereo chorus effect
-        osc.detune.setValueAtTime((index % 2 === 0 ? 5 : -5), ctx.currentTime);
+        // Dynamic volume swell (breathing wave) for each note
+        const noteGain = ctx.createGain();
+        noteGain.gain.setValueAtTime(0.1 + (index * 0.05), ctx.currentTime);
         
-        // Very slow LFO modulation to simulate warm breath swells
+        // Very slow LFO to gently modulate the volume of each note separately (simulating gentle wind chimes)
         const lfo = ctx.createOscillator();
-        lfo.frequency.value = 0.15 + (index * 0.05); // 0.15Hz - 0.3Hz
+        lfo.frequency.value = 0.08 + (index * 0.03); // Super slow cycle (8 to 15 seconds)
         
         const lfoGain = ctx.createGain();
-        lfoGain.gain.value = 0.15; // 15% pitch vibrato swell depth
+        lfoGain.gain.value = 0.05;
         
         lfo.connect(lfoGain);
-        lfoGain.connect(osc.frequency);
+        lfoGain.connect(noteGain.gain);
         
         lfo.start();
         
-        osc.connect(filter);
+        osc.connect(noteGain);
+        noteGain.connect(filter);
         osc.start();
         oscillators.push(osc);
         
@@ -467,9 +471,10 @@ export function useWebSpeech(agentId: string) {
       remoteLog("INFO", "SpeechSynthesis.speak() execution triggered successfully");
 
       // Android Chrome bug: SpeechSynthesis onend sometimes never fires.
-      // Watchdog: estimate speech duration (~80ms per word) + 3s buffer, then force-restart mic.
+      // Watchdog: estimate speech duration based on word count + generous 10s buffer.
+      // We slow down speech to 0.8x and use ellipses, so it takes much longer (~750ms per word).
       const wordCount = text.split(" ").length;
-      const estimatedDurationMs = Math.max(wordCount * 80, 1500) + 3000;
+      const estimatedDurationMs = Math.max(wordCount * 750, 4000) + 10000;
       if (ttsWatchdogRef.current) clearTimeout(ttsWatchdogRef.current);
       ttsWatchdogRef.current = setTimeout(() => {
         if (isAiSpeakingRef.current) {
